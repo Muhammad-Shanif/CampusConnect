@@ -1,0 +1,54 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: campusconnect-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-campusconnect}
+      MYSQL_USER: ${MYSQL_USER:-campusconnect}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-campusconnect}
+    command: ["--event-scheduler=ON"]
+    ports: ["${MYSQL_PORT:-3306}:3306"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/schema/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/schema/02_triggers.sql:/docker-entrypoint-initdb.d/02_triggers.sql:ro
+      - ./database/schema/03_procedures.sql:/docker-entrypoint-initdb.d/03_procedures.sql:ro
+      - ./database/schema/04_views.sql:/docker-entrypoint-initdb.d/04_views.sql:ro
+      - ./database/schema/05_scheduler.sql:/docker-entrypoint-initdb.d/05_scheduler.sql:ro
+      - ./database/seeds/seed_data.sql:/docker-entrypoint-initdb.d/06_seed_data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  backend:
+    build: ./backend
+    container_name: campusconnect-backend
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-campusconnect}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-campusconnect}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-campusconnect}
+      FRONTEND_ORIGIN: http://localhost:3000,http://localhost:5173
+    ports: ["8000:8000"]
+    depends_on:
+      mysql: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  frontend:
+    build:
+      context: ./frontend
+      args: {VITE_API_BASE_URL: /api/v1}
+    container_name: campusconnect-frontend
+    restart: unless-stopped
+    ports: ["3000:80"]
+    depends_on: [backend]
+volumes:
+  mysql_data:
